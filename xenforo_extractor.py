@@ -1,0 +1,314 @@
+#!/usr/bin/env python3
+"""
+XenForo Thread Extractor
+Extracts posts from XenForo forums and converts them to markdown files.
+"""
+
+import requests
+import json
+import os
+import re
+from datetime import datetime
+from typing import List, Dict, Optional
+import argparse
+from pathlib import Path
+
+
+class XenForoExtractor:
+    """Extract posts from XenForo forums using the API."""
+
+    def __init__(self, base_url: str, api_key: str):
+        """
+        Initialize the XenForo extractor.
+
+        Args:
+            base_url: Base URL of the XenForo forum (e.g., https://forum.example.com)
+            api_key: XenForo API key
+        """
+        self.base_url = base_url.rstrip('/')
+        self.api_key = api_key
+        self.headers = {
+            'XF-Api-Key': api_key,
+            'Content-Type': 'application/json'
+        }
+
+    def get_thread_posts(self, thread_id: int, page: int = 1) -> Dict:
+        """
+        Fetch posts from a thread.
+
+        Args:
+            thread_id: The thread ID to extract posts from
+            page: Page number for pagination (default: 1)
+
+        Returns:
+            Dictionary containing posts and pagination info
+        """
+        url = f"{self.base_url}/api/threads/{thread_id}/posts"
+        params = {'page': page}
+
+        response = requests.get(url, headers=self.headers, params=params)
+        response.raise_for_status()
+
+        return response.json()
+
+    def get_all_thread_posts(self, thread_id: int) -> List[Dict]:
+        """
+        Fetch all posts from a thread, handling pagination.
+
+        Args:
+            thread_id: The thread ID to extract posts from
+
+        Returns:
+            List of all posts in the thread
+        """
+        all_posts = []
+        page = 1
+
+        while True:
+            print(f"Fetching page {page}...")
+            data = self.get_thread_posts(thread_id, page)
+
+            posts = data.get('posts', [])
+            if not posts:
+                break
+
+            all_posts.extend(posts)
+
+            # Check if there are more pages
+            pagination = data.get('pagination', {})
+            if page >= pagination.get('last_page', 1):
+                break
+
+            page += 1
+
+        print(f"Fetched {len(all_posts)} posts total")
+        return all_posts
+
+    def get_thread_info(self, thread_id: int) -> Dict:
+        """
+        Fetch thread information.
+
+        Args:
+            thread_id: The thread ID
+
+        Returns:
+            Dictionary containing thread information
+        """
+        url = f"{self.base_url}/api/threads/{thread_id}"
+
+        response = requests.get(url, headers=self.headers)
+        response.raise_for_status()
+
+        return response.json()
+
+    def bb_code_to_markdown(self, bb_code: str) -> str:
+        """
+        Convert BB code to markdown (basic conversion).
+
+        Args:
+            bb_code: BB code string
+
+        Returns:
+            Markdown formatted string
+        """
+        # Remove or convert common BB codes
+        text = bb_code
+
+        # Bold
+        text = re.sub(r'\[b\](.*?)\[/b\]', r'**\1**', text, flags=re.IGNORECASE | re.DOTALL)
+
+        # Italic
+        text = re.sub(r'\[i\](.*?)\[/i\]', r'*\1*', text, flags=re.IGNORECASE | re.DOTALL)
+
+        # Underline (markdown doesn't have native underline, use emphasis)
+        text = re.sub(r'\[u\](.*?)\[/u\]', r'_\1_', text, flags=re.IGNORECASE | re.DOTALL)
+
+        # Strikethrough
+        text = re.sub(r'\[s\](.*?)\[/s\]', r'~~\1~~', text, flags=re.IGNORECASE | re.DOTALL)
+
+        # Code blocks
+        text = re.sub(r'\[code\](.*?)\[/code\]', r'```\n\1\n```', text, flags=re.IGNORECASE | re.DOTALL)
+        text = re.sub(r'\[code=(.*?)\](.*?)\[/code\]', r'```\1\n\2\n```', text, flags=re.IGNORECASE | re.DOTALL)
+
+        # Inline code
+        text = re.sub(r'\[icode\](.*?)\[/icode\]', r'`\1`', text, flags=re.IGNORECASE | re.DOTALL)
+
+        # URLs
+        text = re.sub(r'\[url=(.*?)\](.*?)\[/url\]', r'[\2](\1)', text, flags=re.IGNORECASE | re.DOTALL)
+        text = re.sub(r'\[url\](.*?)\[/url\]', r'[\1](\1)', text, flags=re.IGNORECASE | re.DOTALL)
+
+        # Images
+        text = re.sub(r'\[img\](.*?)\[/img\]', r'![](\1)', text, flags=re.IGNORECASE | re.DOTALL)
+
+        # Quotes
+        text = re.sub(r'\[quote\](.*?)\[/quote\]', r'> \1', text, flags=re.IGNORECASE | re.DOTALL)
+        text = re.sub(r'\[quote=(.*?)\](.*?)\[/quote\]', r'> **\1 wrote:**\n> \2', text, flags=re.IGNORECASE | re.DOTALL)
+
+        # Lists
+        text = re.sub(r'\[list\](.*?)\[/list\]', r'\1', text, flags=re.IGNORECASE | re.DOTALL)
+        text = re.sub(r'\[\*\](.*?)(?=\[\*\]|\[/list\]|$)', r'- \1\n', text, flags=re.IGNORECASE | re.DOTALL)
+
+        # Headers
+        text = re.sub(r'\[h1\](.*?)\[/h1\]', r'# \1', text, flags=re.IGNORECASE | re.DOTALL)
+        text = re.sub(r'\[h2\](.*?)\[/h2\]', r'## \1', text, flags=re.IGNORECASE | re.DOTALL)
+        text = re.sub(r'\[h3\](.*?)\[/h3\]', r'### \1', text, flags=re.IGNORECASE | re.DOTALL)
+
+        # Clean up any remaining BB codes (simple approach)
+        text = re.sub(r'\[.*?\]', '', text)
+
+        return text.strip()
+
+    def format_post_markdown(self, post: Dict, thread_title: str = "") -> str:
+        """
+        Format a single post as markdown.
+
+        Args:
+            post: Post dictionary from API
+            thread_title: Optional thread title for context
+
+        Returns:
+            Markdown formatted post
+        """
+        author = post.get('User', {}).get('username', 'Unknown')
+        post_date = post.get('post_date', 0)
+        post_id = post.get('post_id', 'unknown')
+        message = post.get('message', '')
+
+        # Convert timestamp to readable format
+        if post_date:
+            date_str = datetime.fromtimestamp(post_date).strftime('%Y-%m-%d %H:%M:%S')
+        else:
+            date_str = 'Unknown date'
+
+        # Convert BB code to markdown
+        message_md = self.bb_code_to_markdown(message)
+
+        # Format the post
+        markdown = f"""---
+author: {author}
+date: {date_str}
+post_id: {post_id}
+"""
+
+        if thread_title:
+            markdown += f"thread: {thread_title}\n"
+
+        markdown += f"""---
+
+{message_md}
+"""
+
+        return markdown
+
+    def save_thread_as_markdown(self, thread_id: int, output_dir: str = "output",
+                                 single_file: bool = False):
+        """
+        Extract a thread and save as markdown file(s).
+
+        Args:
+            thread_id: The thread ID to extract
+            output_dir: Directory to save markdown files
+            single_file: If True, save all posts in one file; if False, save each post separately
+        """
+        # Get thread info
+        print(f"Fetching thread info for thread {thread_id}...")
+        thread_info = self.get_thread_info(thread_id)
+        thread_data = thread_info.get('thread', {})
+        thread_title = thread_data.get('title', f'Thread_{thread_id}')
+
+        # Sanitize thread title for filename
+        safe_title = re.sub(r'[^\w\s-]', '', thread_title)
+        safe_title = re.sub(r'[-\s]+', '_', safe_title)
+
+        # Get all posts
+        posts = self.get_all_thread_posts(thread_id)
+
+        # Create output directory
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+
+        if single_file:
+            # Save all posts in one file
+            filename = output_path / f"{safe_title}_{thread_id}.md"
+            print(f"Saving all posts to {filename}...")
+
+            with open(filename, 'w', encoding='utf-8') as f:
+                # Write thread header
+                f.write(f"# {thread_title}\n\n")
+                f.write(f"**Thread ID:** {thread_id}\n")
+                f.write(f"**Total Posts:** {len(posts)}\n\n")
+                f.write("---\n\n")
+
+                # Write each post
+                for i, post in enumerate(posts, 1):
+                    f.write(f"## Post {i}\n\n")
+                    post_md = self.format_post_markdown(post, thread_title)
+                    f.write(post_md)
+                    f.write("\n\n---\n\n")
+
+            print(f"✓ Saved {len(posts)} posts to {filename}")
+        else:
+            # Save each post as a separate file
+            thread_dir = output_path / f"{safe_title}_{thread_id}"
+            thread_dir.mkdir(parents=True, exist_ok=True)
+
+            print(f"Saving posts to {thread_dir}/...")
+
+            # Create an index file
+            index_file = thread_dir / "README.md"
+            with open(index_file, 'w', encoding='utf-8') as f:
+                f.write(f"# {thread_title}\n\n")
+                f.write(f"**Thread ID:** {thread_id}\n")
+                f.write(f"**Total Posts:** {len(posts)}\n\n")
+                f.write("## Posts\n\n")
+
+            for i, post in enumerate(posts, 1):
+                post_id = post.get('post_id', i)
+                filename = thread_dir / f"post_{i:04d}_{post_id}.md"
+
+                with open(filename, 'w', encoding='utf-8') as f:
+                    post_md = self.format_post_markdown(post, thread_title)
+                    f.write(post_md)
+
+                # Add to index
+                author = post.get('User', {}).get('username', 'Unknown')
+                with open(index_file, 'a', encoding='utf-8') as f:
+                    f.write(f"{i}. [Post by {author}](post_{i:04d}_{post_id}.md)\n")
+
+            print(f"✓ Saved {len(posts)} posts to {thread_dir}/")
+
+
+def main():
+    """Main entry point for the script."""
+    parser = argparse.ArgumentParser(
+        description='Extract posts from XenForo threads and convert to markdown'
+    )
+    parser.add_argument('thread_id', type=int, help='Thread ID to extract')
+    parser.add_argument('--base-url', required=True, help='Base URL of XenForo forum')
+    parser.add_argument('--api-key', required=True, help='XenForo API key')
+    parser.add_argument('--output-dir', default='output', help='Output directory (default: output)')
+    parser.add_argument('--single-file', action='store_true',
+                        help='Save all posts in a single file instead of separate files')
+
+    args = parser.parse_args()
+
+    # Create extractor instance
+    extractor = XenForoExtractor(args.base_url, args.api_key)
+
+    # Extract and save thread
+    try:
+        extractor.save_thread_as_markdown(
+            args.thread_id,
+            output_dir=args.output_dir,
+            single_file=args.single_file
+        )
+        print("\n✓ Extraction complete!")
+    except requests.exceptions.HTTPError as e:
+        print(f"\n✗ HTTP Error: {e}")
+        print(f"Response: {e.response.text if hasattr(e, 'response') else 'No response'}")
+    except Exception as e:
+        print(f"\n✗ Error: {e}")
+
+
+if __name__ == '__main__':
+    main()
