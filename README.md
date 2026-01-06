@@ -6,6 +6,7 @@ A Python tool to extract posts from XenForo v2.2.8 Patch 1 forums and convert th
 
 - Extract all posts from a XenForo thread via API
 - Capture author, timestamp, and post content
+- Automatic user role detection (Admin, Moderator, Character, Narrator, DM)
 - Convert BB code to Markdown format
 - Handle pagination automatically
 - Save as single file or individual post files
@@ -147,19 +148,24 @@ Thread_Title_12345/
 
 ### Post Format
 
-Each post includes a header and YAML frontmatter with metadata:
+Each post includes a header with metadata and optional role badge:
 
 ```markdown
 ## Post 1
 
----
-Author: username
-Date: 2024-01-15
-Post_ID: 67890
----
+**Author:** username (Admin)\
+**Date:** 2024-01-15\
+**Post_ID:** 67890
 
 Post content in markdown format...
 ```
+
+The tool automatically detects user roles from the XenForo API:
+- **(Admin)** - Administrators (user_group_id = 3)
+- **(Narrator)** - Narrators (user_group_id = 12)
+- **(Moderator)** - Moderators (user_group_id = 4)
+- **(Character)** - Characters (user_group_id = 5)
+- **(DM)** - Dungeon Masters (secondary_group_id = 21)
 
 ## BB Code Conversion
 
@@ -172,8 +178,8 @@ The tool automatically converts common BB codes to Markdown:
 | `[u]text[/u]` | `_text_` | Underline |
 | `[s]text[/s]` | `~~text~~` | Strikethrough |
 | `[code]code[/code]` | ` ```code``` ` | Code block |
-| `[url=link]text[/url]` | `[text](link)` | Link |
-| `[img]url[/img]` | `![](url)` | Image |
+| `[url=link]text[/url]` | `text` | Link text only |
+| `[img]url[/img]` | _(removed)_ | Images removed entirely |
 | `[quote]text[/quote]` | `> text` | Quote |
 | `[spoiler=title]text[/spoiler]` | `Spoiler-title: text` | Spoiler with title |
 | `[spoiler]text[/spoiler]` | `Spoiler: text` | Spoiler without title |

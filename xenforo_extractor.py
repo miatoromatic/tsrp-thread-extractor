@@ -31,6 +31,54 @@ class XenForoExtractor:
             'XF-Api-Key': api_key,
             'Content-Type': 'application/json'
         }
+        # Cache for user data to avoid repeated API calls
+        self.user_cache = {}
+
+    def get_user_role(self, user_id: int) -> str:
+        """
+        Get the user's role based on their user_group_id and secondary_group_ids.
+
+        Args:
+            user_id: The user ID
+
+        Returns:
+            Role string (e.g., "(Admin)", "(Moderator)") or empty string
+        """
+        # Check cache first
+        if user_id in self.user_cache:
+            return self.user_cache[user_id]
+
+        try:
+            url = f"{self.base_url}/api/users/{user_id}"
+            response = requests.get(url, headers=self.headers)
+            response.raise_for_status()
+            user_data = response.json().get('user', {})
+
+            user_group_id = user_data.get('user_group_id')
+            secondary_group_ids = user_data.get('secondary_group_ids', [])
+
+            # Determine role based on group IDs
+            role = ""
+            if user_group_id == 3:
+                role = "(Admin)"
+            elif user_group_id == 12:
+                role = "(Narrator)"
+            elif user_group_id == 4:
+                role = "(Moderator)"
+            elif user_group_id == 5:
+                role = "(Character)"
+            elif 21 in secondary_group_ids:
+                role = "(DM)"
+
+            # Cache the result
+            self.user_cache[user_id] = role
+            return role
+
+        except Exception as e:
+            print(f"Warning: Could not fetch user data for user {user_id}: {e}")
+            # Cache empty string to avoid repeated failed requests
+            self.user_cache[user_id] = ""
+            return ""
 
     def get_thread_posts(self, thread_id: int, page: int = 1) -> Dict:
         """
@@ -167,12 +215,12 @@ class XenForoExtractor:
         # Inline code
         text = re.sub(r'\[icode\](.*?)\[/icode\]', r'`\1`', text, flags=re.IGNORECASE | re.DOTALL)
 
-        # URLs
-        text = re.sub(r'\[url=(.*?)\](.*?)\[/url\]', r'[\2](\1)', text, flags=re.IGNORECASE | re.DOTALL)
-        text = re.sub(r'\[url\](.*?)\[/url\]', r'[\1](\1)', text, flags=re.IGNORECASE | re.DOTALL)
+        # URLs - keep only the text part
+        text = re.sub(r'\[url=(.*?)\](.*?)\[/url\]', r'\2', text, flags=re.IGNORECASE | re.DOTALL)
+        text = re.sub(r'\[url\](.*?)\[/url\]', r'\1', text, flags=re.IGNORECASE | re.DOTALL)
 
-        # Images
-        text = re.sub(r'\[img\](.*?)\[/img\]', r'![](\1)', text, flags=re.IGNORECASE | re.DOTALL)
+        # Images - remove entirely
+        text = re.sub(r'\[img\].*?\[/img\]', '', text, flags=re.IGNORECASE | re.DOTALL)
 
         # Quotes
         text = re.sub(r'\[quote\](.*?)\[/quote\]', r'> \1', text, flags=re.IGNORECASE | re.DOTALL)
@@ -204,10 +252,19 @@ class XenForoExtractor:
         Returns:
             Markdown formatted post
         """
-        author = post.get('User', {}).get('username', 'Unknown')
+        user_data = post.get('User', {})
+        author = user_data.get('username', 'Unknown')
+        user_id = user_data.get('user_id')
         post_date = post.get('post_date', 0)
         post_id = post.get('post_id', 'unknown')
         message = post.get('message', '')
+
+        # Get user role if user_id is available
+        role = ""
+        if user_id:
+            role = self.get_user_role(user_id)
+            if role:
+                role = f" {role}"
 
         # Convert timestamp to readable format (date only, no time)
         if post_date:
@@ -218,12 +275,10 @@ class XenForoExtractor:
         # Convert BB code to markdown
         message_md = self.bb_code_to_markdown(message)
 
-        # Format the post with new header format
-        markdown = f"""---
-Author: {author}
-Date: {date_str}
-Post_ID: {post_id}
----
+        # Format the post with new header format (bold with backslash line breaks)
+        markdown = f"""**Author:** {author}{role}\\
+**Date:** {date_str}\\
+**Post_ID:** {post_id}
 
 {message_md}
 """
