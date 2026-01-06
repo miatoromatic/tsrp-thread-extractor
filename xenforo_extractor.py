@@ -50,12 +50,19 @@ class XenForoExtractor:
 
         try:
             url = f"{self.base_url}/api/users/{user_id}"
-            response = requests.get(url, headers=self.headers)
+            # Add api_bypass_permissions to access internal profile data (user groups)
+            params = {'api_bypass_permissions': 1}
+            response = requests.get(url, headers=self.headers, params=params)
             response.raise_for_status()
-            user_data = response.json().get('user', {})
+
+            data = response.json()
+            user_data = data.get('user', {})
 
             user_group_id = user_data.get('user_group_id')
             secondary_group_ids = user_data.get('secondary_group_ids', [])
+
+            # Debug output (can be removed later)
+            print(f"  Debug: User {user_id} - group_id: {user_group_id}, secondary: {secondary_group_ids}")
 
             # Determine role based on group IDs
             role = ""
@@ -329,7 +336,7 @@ class XenForoExtractor:
                     f.write(f"## Post {i}\n\n")
                     post_md = self.format_post_markdown(post, thread_title, post_number=i)
                     f.write(post_md)
-                    f.write("\n\n---\n\n")
+                    f.write("\n\n")
 
             print(f"✓ Saved {len(posts)} posts to {filename}")
         else:
