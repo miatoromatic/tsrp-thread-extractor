@@ -237,38 +237,59 @@ class XenForoExtractor:
         Returns:
             Markdown formatted post
         """
-        user_data = post.get('User', {})
-        author = user_data.get('username', 'Unknown')
-        user_id = user_data.get('user_id')
-        post_date = post.get('post_date', 0)
-        post_id = post.get('post_id', 'unknown')
-        message = post.get('message', '')
+        # Debug: Check if post is None
+        if post is None:
+            print(f"  Warning: Post {post_number} is None, skipping...")
+            return ""
 
-        # Get user role from mapping
-        role = ""
-        if user_id:
-            role = self.get_user_role(user_id)
-            if role:
-                role = f" {role}"
+        # Debug: Check if post is a dict
+        if not isinstance(post, dict):
+            print(f"  Warning: Post {post_number} is not a dict (type: {type(post)}), skipping...")
+            return ""
 
-        # Convert timestamp to readable format (date only, no time)
-        if post_date:
-            date_str = datetime.fromtimestamp(post_date).strftime('%Y-%m-%d')
-        else:
-            date_str = 'Unknown date'
+        try:
+            user_data = post.get('User', {})
+            if user_data is None:
+                user_data = {}
 
-        # Convert BB code to markdown
-        message_md = self.bb_code_to_markdown(message)
+            author = user_data.get('username', 'Unknown')
+            user_id = user_data.get('user_id')
+            post_date = post.get('post_date', 0)
+            post_id = post.get('post_id', 'unknown')
+            message = post.get('message', '')
 
-        # Format the post with new header format (bold with backslash line breaks)
-        markdown = f"""**Author:** {author}{role}\\
+            # Get user role from mapping
+            role = ""
+            if user_id:
+                role = self.get_user_role(user_id)
+                if role:
+                    role = f" {role}"
+
+            # Convert timestamp to readable format (date only, no time)
+            if post_date:
+                date_str = datetime.fromtimestamp(post_date).strftime('%Y-%m-%d')
+            else:
+                date_str = 'Unknown date'
+
+            # Convert BB code to markdown
+            message_md = self.bb_code_to_markdown(message)
+
+            # Format the post with new header format (bold with backslash line breaks)
+            markdown = f"""**Author:** {author}{role}\\
 **Date:** {date_str}\\
 **Post_ID:** {post_id}
 
 {message_md}
 """
 
-        return markdown
+            return markdown
+
+        except Exception as e:
+            print(f"  Error formatting post {post_number}: {e}")
+            print(f"  Post data keys: {list(post.keys()) if isinstance(post, dict) else 'Not a dict'}")
+            print(f"  Post data: {post}")
+            # Return a placeholder so we can continue
+            return f"**Error:** Could not format post {post_number} - {str(e)}\n\n"
 
     def save_thread_as_markdown(self, thread_id: int, output_dir: str = "output",
                                  single_file: bool = False):
