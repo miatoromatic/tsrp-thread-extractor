@@ -17,13 +17,14 @@ from pathlib import Path
 class XenForoExtractor:
     """Extract posts from XenForo forums using the API."""
 
-    def __init__(self, base_url: str, api_key: str):
+    def __init__(self, base_url: str, api_key: str, user_roles_file: str = 'user_roles.json'):
         """
         Initialize the XenForo extractor.
 
         Args:
             base_url: Base URL of the XenForo forum (e.g., https://forum.example.com)
             api_key: XenForo API key
+            user_roles_file: Path to JSON file containing user_id -> role mappings
         """
         self.base_url = base_url.rstrip('/')
         self.api_key = api_key
@@ -31,46 +32,26 @@ class XenForoExtractor:
             'XF-Api-Key': api_key,
             'Content-Type': 'application/json'
         }
-        # Cache for user data to avoid repeated API calls
-        self.user_cache = {}
-        # Cache for user groups (id -> name mapping)
-        self.user_groups = {}
-        self._load_user_groups()
+        # Load user role mappings from JSON file
+        self.user_roles = self._load_user_roles(user_roles_file)
 
-    def _load_user_groups(self):
-        """Fetch user groups from the API and cache them."""
+    def _load_user_roles(self, file_path: str) -> Dict[str, str]:
+        """Load user role mappings from JSON file."""
         try:
-            url = f"{self.base_url}/api/user-groups/"
-            response = requests.get(url, headers=self.headers)
-            response.raise_for_status()
-
-            data = response.json()
-            groups = data.get('user_groups', [])
-
-            # Build mapping of group_id -> group_title
-            for group in groups:
-                group_id = group.get('user_group_id')
-                group_title = group.get('title')
-                if group_id and group_title:
-                    self.user_groups[group_id] = group_title
-
-            print(f"Loaded {len(self.user_groups)} user groups from API")
-            print(f"  Available groups: {self.user_groups}")
-
-        except Exception as e:
-            print(f"Warning: Could not load user groups: {e}")
-            # Set default mappings as fallback
-            self.user_groups = {
-                3: "Administrator",
-                4: "Moderator",
-                5: "Character",
-                12: "Narrator",
-                21: "Dungeon Master"
-            }
+            with open(file_path, 'r') as f:
+                roles = json.load(f)
+            print(f"✓ Loaded {len(roles)} user role mappings from {file_path}")
+            return roles
+        except FileNotFoundError:
+            print(f"Note: {file_path} not found, role badges will not be displayed")
+            return {}
+        except json.JSONDecodeError as e:
+            print(f"Warning: Error parsing {file_path}: {e}")
+            return {}
 
     def get_user_role(self, user_id: int) -> str:
         """
-        Get the user's role based on their user_group_id and secondary_user_group_ids.
+        Get the user's role from the user_roles mapping.
 
         Args:
             user_id: The user ID
@@ -78,76 +59,11 @@ class XenForoExtractor:
         Returns:
             Role string (e.g., "(Admin)", "(Moderator)") or empty string
         """
-        # Check cache first
-        if user_id in self.user_cache:
-            return self.user_cache[user_id]
-
-        try:
-            url = f"{self.base_url}/api/users/{user_id}"
-            # Add parameters to access user group data
-            params = {
-                'api_bypass_permissions': 1,
-                'with': 'profile'
-            }
-            response = requests.get(url, headers=self.headers, params=params)
-            response.raise_for_status()
-
-            data = response.json()
-            user_data = data.get('user', {})
-
-            # Debug output - show what fields are actually available
-            print(f"  Debug: User {user_id} API response:")
-            print(f"    Available fields: {list(user_data.keys())}")
-
-            # Try different possible field names
-            user_group_id = user_data.get('user_group_id')
-
-            # XenForo uses 'secondary_user_group_ids' not 'secondary_group_ids'
-            secondary_group_ids_raw = user_data.get('secondary_user_group_ids', [])
-
-            print(f"    - user_group_id: {user_group_id}")
-            print(f"    - secondary_user_group_ids: {secondary_group_ids_raw} (type: {type(secondary_group_ids_raw)})")
-
-            # Handle secondary_user_group_ids as either list or comma-separated string
-            if isinstance(secondary_group_ids_raw, str):
-                # Convert comma-separated string to list of integers
-                secondary_user_group_ids = [int(x.strip()) for x in secondary_group_ids_raw.split(',') if x.strip()]
-            elif isinstance(secondary_group_ids_raw, list):
-                # Already a list - ensure integers
-                secondary_user_group_ids = [int(x) for x in secondary_group_ids_raw if x]
-            else:
-                secondary_user_group_ids = []
-
-            print(f"    - parsed secondary_user_group_ids: {secondary_user_group_ids}")
-
-            # Determine role based on group IDs
-            role = ""
-            if user_group_id == 3:
-                role = "(Admin)"
-            elif user_group_id == 12:
-                role = "(Narrator)"
-            elif user_group_id == 4:
-                role = "(Moderator)"
-            elif user_group_id == 5:
-                role = "(Character)"
-            # Check secondary groups using includes() pattern like your JS code
-            elif secondary_user_group_ids and 21 in secondary_user_group_ids:
-                role = "(DM)"
-
-            print(f"    - detected role: {role if role else 'None'}")
-
-            # Cache the result
-            self.user_cache[user_id] = role
-            return role
-
-        except Exception as e:
-            print(f"  Warning: Could not fetch user data for user {user_id}: {e}")
-            # Print response text if available for debugging
-            if hasattr(e, 'response') and hasattr(e.response, 'text'):
-                print(f"    Response: {e.response.text[:500]}")
-            # Cache empty string to avoid repeated failed requests
-            self.user_cache[user_id] = ""
-            return ""
+        user_id_str = str(user_id)
+        if user_id_str in self.user_roles:
+            role_name = self.user_roles[user_id_str]
+            return f"({role_name})"
+        return ""
 
     def get_thread_posts(self, thread_id: int, page: int = 1) -> Dict:
         """
@@ -161,10 +77,7 @@ class XenForoExtractor:
             Dictionary containing posts and pagination info
         """
         url = f"{self.base_url}/api/threads/{thread_id}/posts"
-        params = {
-            'page': page,
-            'with_user': 1  # Try to get full user data including groups
-        }
+        params = {'page': page}
 
         response = requests.get(url, headers=self.headers, params=params)
         response.raise_for_status()
@@ -331,26 +244,10 @@ class XenForoExtractor:
         post_id = post.get('post_id', 'unknown')
         message = post.get('message', '')
 
-        # Debug: Show what's in the User object from the post
-        if post_number == 1:  # Only show for first post to avoid spam
-            print(f"  Debug: Post User object fields: {list(user_data.keys())}")
-            print(f"    - user_group_id in User: {user_data.get('user_group_id')}")
-            print(f"    - secondary_user_group_ids in User: {user_data.get('secondary_user_group_ids')}")
-
-        # Get user role - try from post data first, then API call
+        # Get user role from mapping
         role = ""
         if user_id:
-            # Check if post data already has group info
-            user_group_id = user_data.get('user_group_id')
-            secondary_user_group_ids = user_data.get('secondary_user_group_ids', [])
-
-            if user_group_id is not None or secondary_user_group_ids:
-                # Use group data from post
-                role = self._determine_role_from_groups(user_group_id, secondary_user_group_ids)
-            else:
-                # Fallback to API call (may not work without super user permissions)
-                role = self.get_user_role(user_id)
-
+            role = self.get_user_role(user_id)
             if role:
                 role = f" {role}"
 
@@ -372,46 +269,6 @@ class XenForoExtractor:
 """
 
         return markdown
-
-    def _determine_role_from_groups(self, user_group_id: int, secondary_user_group_ids) -> str:
-        """
-        Determine user role from group IDs using fetched group names.
-
-        Args:
-            user_group_id: Primary user group ID
-            secondary_user_group_ids: List or string of secondary group IDs
-
-        Returns:
-            Role string with group name in parentheses, or empty string
-        """
-        # Handle secondary_user_group_ids as either list or comma-separated string
-        if isinstance(secondary_user_group_ids, str):
-            secondary_ids = [int(x.strip()) for x in secondary_user_group_ids.split(',') if x.strip()]
-        elif isinstance(secondary_user_group_ids, list):
-            secondary_ids = [int(x) for x in secondary_user_group_ids if x]
-        else:
-            secondary_ids = []
-
-        # Priority order for role assignment:
-        # 1. Check primary group for special roles (Admin, Narrator, Moderator, Character)
-        # 2. Check secondary groups for DM (21)
-
-        # Check primary group first
-        if user_group_id in self.user_groups:
-            group_name = self.user_groups[user_group_id]
-            # Only return primary group if it's one of our special groups
-            if user_group_id in [3, 4, 5, 12]:  # Admin, Moderator, Character, Narrator
-                return f"({group_name})"
-
-        # Check secondary groups
-        for group_id in secondary_ids:
-            if group_id in self.user_groups:
-                group_name = self.user_groups[group_id]
-                # Return first matching special group in secondary groups
-                if group_id in [3, 4, 5, 12, 21]:  # Include DM (21)
-                    return f"({group_name})"
-
-        return ""
 
     def save_thread_as_markdown(self, thread_id: int, output_dir: str = "output",
                                  single_file: bool = False):
@@ -544,7 +401,7 @@ def main():
         return 1
 
     # Create extractor instance
-    extractor = XenForoExtractor(base_url, api_key)
+    extractor = XenForoExtractor(base_url, api_key, user_roles_file='user_roles.json')
 
     # Extract and save thread
     try:

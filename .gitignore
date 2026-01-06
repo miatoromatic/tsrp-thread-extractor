@@ -1,5 +1,6 @@
 # Configuration files with sensitive data
 config.json
+user_roles.json
 
 # Python
 __pycache__/
