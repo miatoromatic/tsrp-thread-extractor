@@ -294,10 +294,26 @@ class XenForoExtractor:
         post_id = post.get('post_id', 'unknown')
         message = post.get('message', '')
 
-        # Get user role if user_id is available
+        # Debug: Show what's in the User object from the post
+        if post_number == 1:  # Only show for first post to avoid spam
+            print(f"  Debug: Post User object fields: {list(user_data.keys())}")
+            print(f"    - user_group_id in User: {user_data.get('user_group_id')}")
+            print(f"    - secondary_user_group_ids in User: {user_data.get('secondary_user_group_ids')}")
+
+        # Get user role - try from post data first, then API call
         role = ""
         if user_id:
-            role = self.get_user_role(user_id)
+            # Check if post data already has group info
+            user_group_id = user_data.get('user_group_id')
+            secondary_user_group_ids = user_data.get('secondary_user_group_ids', [])
+
+            if user_group_id is not None or secondary_user_group_ids:
+                # Use group data from post
+                role = self._determine_role_from_groups(user_group_id, secondary_user_group_ids)
+            else:
+                # Fallback to API call (may not work without super user permissions)
+                role = self.get_user_role(user_id)
+
             if role:
                 role = f" {role}"
 
@@ -319,6 +335,39 @@ class XenForoExtractor:
 """
 
         return markdown
+
+    def _determine_role_from_groups(self, user_group_id: int, secondary_user_group_ids) -> str:
+        """
+        Determine user role from group IDs.
+
+        Args:
+            user_group_id: Primary user group ID
+            secondary_user_group_ids: List or string of secondary group IDs
+
+        Returns:
+            Role string or empty string
+        """
+        # Handle secondary_user_group_ids as either list or comma-separated string
+        if isinstance(secondary_user_group_ids, str):
+            secondary_ids = [int(x.strip()) for x in secondary_user_group_ids.split(',') if x.strip()]
+        elif isinstance(secondary_user_group_ids, list):
+            secondary_ids = [int(x) for x in secondary_user_group_ids if x]
+        else:
+            secondary_ids = []
+
+        # Determine role based on group IDs
+        if user_group_id == 3:
+            return "(Admin)"
+        elif user_group_id == 12:
+            return "(Narrator)"
+        elif user_group_id == 4:
+            return "(Moderator)"
+        elif user_group_id == 5:
+            return "(Character)"
+        elif 21 in secondary_ids:
+            return "(DM)"
+
+        return ""
 
     def save_thread_as_markdown(self, thread_id: int, output_dir: str = "output",
                                  single_file: bool = False):
