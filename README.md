@@ -71,7 +71,13 @@ cp config.example.json config.json
 }
 ```
 
-3. Run the extractor with just the thread ID:
+3. (Optional) Set up user role mappings:
+```bash
+# user_roles.json is already created with example mappings
+# Edit it to add your user ID -> role mappings
+```
+
+4. Run the extractor with just the thread ID:
 ```bash
 python xenforo_extractor.py 12345
 ```
@@ -88,37 +94,46 @@ python xenforo_extractor.py <thread_id> --base-url https://your-forum.com --api-
 
 ### Options
 
-- `thread_id` (required): The ID of the thread to extract
+- `thread_ids` (required): One or more thread IDs to extract (space-separated for multiple)
 - `--base-url`: Base URL of your XenForo forum (optional if using config.json)
 - `--api-key`: Your XenForo API key (optional if using config.json)
 - `--config`: Path to config file (default: `config.json`)
 - `--output-dir`: Directory to save markdown files (default: `output`)
-- `--single-file`: Save all posts in one file instead of separate files
+- `--single-file`: Save all posts in one file instead of separate files (applies to each thread)
 
 ### Examples
 
-**Using config.json (simplest):**
+**Single thread extraction:**
 ```bash
-# Extract to separate files
+# Extract one thread to separate files
 python xenforo_extractor.py 12345
 
-# Extract to single file
+# Extract one thread to single file
 python xenforo_extractor.py 12345 --single-file
-
-# Use custom config file
-python xenforo_extractor.py 12345 --config my-config.json
 ```
 
-**Using command-line arguments:**
+**Multiple threads extraction:**
 ```bash
-# Extract thread to separate files
+# Extract multiple threads (space-separated)
+python xenforo_extractor.py 12345 67890 11111
+
+# Extract multiple threads to single files
+python xenforo_extractor.py 12345 67890 11111 --single-file
+
+# Use custom config and output directory
+python xenforo_extractor.py 12345 67890 --config my-config.json --output-dir my_threads
+```
+
+**Using command-line arguments (without config.json):**
+```bash
+# Extract single thread
 python xenforo_extractor.py 12345 \
   --base-url https://forum.example.com \
   --api-key abc123xyz789 \
   --output-dir extracted_threads
 
-# Extract thread to a single file
-python xenforo_extractor.py 12345 \
+# Extract multiple threads
+python xenforo_extractor.py 12345 67890 11111 \
   --base-url https://forum.example.com \
   --api-key abc123xyz789 \
   --single-file
@@ -160,12 +175,17 @@ Each post includes a header with metadata and optional role badge:
 Post content in markdown format...
 ```
 
-The tool automatically detects user roles from the XenForo API:
-- **(Admin)** - Administrators (user_group_id = 3)
-- **(Narrator)** - Narrators (user_group_id = 12)
-- **(Moderator)** - Moderators (user_group_id = 4)
-- **(Character)** - Characters (user_group_id = 5)
-- **(DM)** - Dungeon Masters (secondary_group_id = 21)
+The tool displays user roles based on the `user_roles.json` mapping file:
+- Edit `user_roles.json` to map user IDs to their roles
+- Example: `{"1": "Admin", "105": "Moderator", "124": "DM"}`
+- Roles appear in parentheses after the author name
+- If a user ID is not in the mapping, no role badge is displayed
+
+**To add or update user roles:**
+1. Open `user_roles.json`
+2. Add entries in the format: `"user_id": "Role"`
+3. Save the file
+4. Run the extractor again
 
 ## BB Code Conversion
 

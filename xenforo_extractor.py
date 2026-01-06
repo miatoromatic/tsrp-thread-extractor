@@ -375,7 +375,8 @@ def main():
     parser = argparse.ArgumentParser(
         description='Extract posts from XenForo threads and convert to markdown'
     )
-    parser.add_argument('thread_id', type=int, help='Thread ID to extract')
+    parser.add_argument('thread_ids', type=int, nargs='+',
+                        help='Thread ID(s) to extract (space-separated for multiple threads)')
     parser.add_argument('--base-url', help='Base URL of XenForo forum')
     parser.add_argument('--api-key', help='XenForo API key')
     parser.add_argument('--config', default='config.json', help='Path to config file (default: config.json)')
@@ -403,22 +404,41 @@ def main():
     # Create extractor instance
     extractor = XenForoExtractor(base_url, api_key, user_roles_file='user_roles.json')
 
-    # Extract and save thread
-    try:
-        extractor.save_thread_as_markdown(
-            args.thread_id,
-            output_dir=args.output_dir,
-            single_file=args.single_file
-        )
-        print("\n✓ Extraction complete!")
-        return 0
-    except requests.exceptions.HTTPError as e:
-        print(f"\n✗ HTTP Error: {e}")
-        print(f"Response: {e.response.text if hasattr(e, 'response') else 'No response'}")
-        return 1
-    except Exception as e:
-        print(f"\n✗ Error: {e}")
-        return 1
+    # Extract and save threads
+    total_threads = len(args.thread_ids)
+    successful = 0
+    failed = 0
+
+    for idx, thread_id in enumerate(args.thread_ids, 1):
+        if total_threads > 1:
+            print(f"\n{'='*60}")
+            print(f"Processing thread {idx}/{total_threads}: Thread ID {thread_id}")
+            print(f"{'='*60}")
+
+        try:
+            extractor.save_thread_as_markdown(
+                thread_id,
+                output_dir=args.output_dir,
+                single_file=args.single_file
+            )
+            successful += 1
+        except requests.exceptions.HTTPError as e:
+            print(f"\n✗ HTTP Error for thread {thread_id}: {e}")
+            print(f"Response: {e.response.text if hasattr(e, 'response') else 'No response'}")
+            failed += 1
+        except Exception as e:
+            print(f"\n✗ Error for thread {thread_id}: {e}")
+            failed += 1
+
+    # Summary
+    print(f"\n{'='*60}")
+    print(f"✓ Extraction complete!")
+    print(f"  Successful: {successful}/{total_threads}")
+    if failed > 0:
+        print(f"  Failed: {failed}/{total_threads}")
+    print(f"{'='*60}")
+
+    return 0 if failed == 0 else 1
 
 
 if __name__ == '__main__':
