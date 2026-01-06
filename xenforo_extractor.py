@@ -33,6 +33,40 @@ class XenForoExtractor:
         }
         # Cache for user data to avoid repeated API calls
         self.user_cache = {}
+        # Cache for user groups (id -> name mapping)
+        self.user_groups = {}
+        self._load_user_groups()
+
+    def _load_user_groups(self):
+        """Fetch user groups from the API and cache them."""
+        try:
+            url = f"{self.base_url}/api/user-groups/"
+            response = requests.get(url, headers=self.headers)
+            response.raise_for_status()
+
+            data = response.json()
+            groups = data.get('user_groups', [])
+
+            # Build mapping of group_id -> group_title
+            for group in groups:
+                group_id = group.get('user_group_id')
+                group_title = group.get('title')
+                if group_id and group_title:
+                    self.user_groups[group_id] = group_title
+
+            print(f"Loaded {len(self.user_groups)} user groups from API")
+            print(f"  Available groups: {self.user_groups}")
+
+        except Exception as e:
+            print(f"Warning: Could not load user groups: {e}")
+            # Set default mappings as fallback
+            self.user_groups = {
+                3: "Administrator",
+                4: "Moderator",
+                5: "Character",
+                12: "Narrator",
+                21: "Dungeon Master"
+            }
 
     def get_user_role(self, user_id: int) -> str:
         """
@@ -127,7 +161,10 @@ class XenForoExtractor:
             Dictionary containing posts and pagination info
         """
         url = f"{self.base_url}/api/threads/{thread_id}/posts"
-        params = {'page': page}
+        params = {
+            'page': page,
+            'with_user': 1  # Try to get full user data including groups
+        }
 
         response = requests.get(url, headers=self.headers, params=params)
         response.raise_for_status()
@@ -338,14 +375,14 @@ class XenForoExtractor:
 
     def _determine_role_from_groups(self, user_group_id: int, secondary_user_group_ids) -> str:
         """
-        Determine user role from group IDs.
+        Determine user role from group IDs using fetched group names.
 
         Args:
             user_group_id: Primary user group ID
             secondary_user_group_ids: List or string of secondary group IDs
 
         Returns:
-            Role string or empty string
+            Role string with group name in parentheses, or empty string
         """
         # Handle secondary_user_group_ids as either list or comma-separated string
         if isinstance(secondary_user_group_ids, str):
@@ -355,17 +392,24 @@ class XenForoExtractor:
         else:
             secondary_ids = []
 
-        # Determine role based on group IDs
-        if user_group_id == 3:
-            return "(Admin)"
-        elif user_group_id == 12:
-            return "(Narrator)"
-        elif user_group_id == 4:
-            return "(Moderator)"
-        elif user_group_id == 5:
-            return "(Character)"
-        elif 21 in secondary_ids:
-            return "(DM)"
+        # Priority order for role assignment:
+        # 1. Check primary group for special roles (Admin, Narrator, Moderator, Character)
+        # 2. Check secondary groups for DM (21)
+
+        # Check primary group first
+        if user_group_id in self.user_groups:
+            group_name = self.user_groups[user_group_id]
+            # Only return primary group if it's one of our special groups
+            if user_group_id in [3, 4, 5, 12]:  # Admin, Moderator, Character, Narrator
+                return f"({group_name})"
+
+        # Check secondary groups
+        for group_id in secondary_ids:
+            if group_id in self.user_groups:
+                group_name = self.user_groups[group_id]
+                # Return first matching special group in secondary groups
+                if group_id in [3, 4, 5, 12, 21]:  # Include DM (21)
+                    return f"({group_name})"
 
         return ""
 
