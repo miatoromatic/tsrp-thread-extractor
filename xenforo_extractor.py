@@ -50,19 +50,38 @@ class XenForoExtractor:
 
         try:
             url = f"{self.base_url}/api/users/{user_id}"
-            # Add api_bypass_permissions to access internal profile data (user groups)
-            params = {'api_bypass_permissions': 1}
+            # Add parameters to access user group data
+            # - api_bypass_permissions: Required to access internal profile data
+            # - with: Request additional data relations
+            params = {
+                'api_bypass_permissions': 1,
+                'with': 'profile'
+            }
             response = requests.get(url, headers=self.headers, params=params)
             response.raise_for_status()
 
             data = response.json()
             user_data = data.get('user', {})
 
-            user_group_id = user_data.get('user_group_id')
-            secondary_group_ids = user_data.get('secondary_group_ids', [])
+            # Debug output - show full user data structure
+            print(f"  Debug: User {user_id} API response:")
+            print(f"    - user_group_id: {user_data.get('user_group_id')}")
+            print(f"    - secondary_group_ids: {user_data.get('secondary_group_ids')} (type: {type(user_data.get('secondary_group_ids'))})")
 
-            # Debug output (can be removed later)
-            print(f"  Debug: User {user_id} - group_id: {user_group_id}, secondary: {secondary_group_ids}")
+            user_group_id = user_data.get('user_group_id')
+            secondary_group_ids_raw = user_data.get('secondary_group_ids', [])
+
+            # Handle secondary_group_ids as either list or comma-separated string
+            if isinstance(secondary_group_ids_raw, str):
+                # Convert comma-separated string to list of integers
+                secondary_group_ids = [int(x.strip()) for x in secondary_group_ids_raw.split(',') if x.strip()]
+            elif isinstance(secondary_group_ids_raw, list):
+                # Already a list
+                secondary_group_ids = secondary_group_ids_raw
+            else:
+                secondary_group_ids = []
+
+            print(f"    - parsed secondary_group_ids: {secondary_group_ids}")
 
             # Determine role based on group IDs
             role = ""
@@ -77,12 +96,17 @@ class XenForoExtractor:
             elif 21 in secondary_group_ids:
                 role = "(DM)"
 
+            print(f"    - detected role: {role if role else 'None'}")
+
             # Cache the result
             self.user_cache[user_id] = role
             return role
 
         except Exception as e:
-            print(f"Warning: Could not fetch user data for user {user_id}: {e}")
+            print(f"  Warning: Could not fetch user data for user {user_id}: {e}")
+            # Print response text if available for debugging
+            if hasattr(e, 'response') and hasattr(e.response, 'text'):
+                print(f"    Response: {e.response.text[:200]}")
             # Cache empty string to avoid repeated failed requests
             self.user_cache[user_id] = ""
             return ""
