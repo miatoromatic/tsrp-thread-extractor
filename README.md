@@ -53,9 +53,33 @@ cp config.example.json config.json
 
 ## Usage
 
+### Using Configuration File (Recommended)
+
+To avoid entering your URL and API key every time, create a `config.json` file:
+
+1. Copy the example configuration:
+```bash
+cp config.example.json config.json
+```
+
+2. Edit `config.json` with your credentials:
+```json
+{
+  "base_url": "https://your-forum.com",
+  "api_key": "your-api-key-here"
+}
+```
+
+3. Run the extractor with just the thread ID:
+```bash
+python xenforo_extractor.py 12345
+```
+
+The script will automatically load credentials from `config.json`. You can still override them with command-line arguments if needed.
+
 ### Command Line
 
-Basic usage with command-line arguments:
+You can also provide credentials directly via command-line arguments:
 
 ```bash
 python xenforo_extractor.py <thread_id> --base-url https://your-forum.com --api-key YOUR_API_KEY
@@ -64,23 +88,35 @@ python xenforo_extractor.py <thread_id> --base-url https://your-forum.com --api-
 ### Options
 
 - `thread_id` (required): The ID of the thread to extract
-- `--base-url` (required): Base URL of your XenForo forum
-- `--api-key` (required): Your XenForo API key
+- `--base-url`: Base URL of your XenForo forum (optional if using config.json)
+- `--api-key`: Your XenForo API key (optional if using config.json)
+- `--config`: Path to config file (default: `config.json`)
 - `--output-dir`: Directory to save markdown files (default: `output`)
 - `--single-file`: Save all posts in one file instead of separate files
 
 ### Examples
 
-**Extract thread to separate files:**
+**Using config.json (simplest):**
 ```bash
+# Extract to separate files
+python xenforo_extractor.py 12345
+
+# Extract to single file
+python xenforo_extractor.py 12345 --single-file
+
+# Use custom config file
+python xenforo_extractor.py 12345 --config my-config.json
+```
+
+**Using command-line arguments:**
+```bash
+# Extract thread to separate files
 python xenforo_extractor.py 12345 \
   --base-url https://forum.example.com \
   --api-key abc123xyz789 \
   --output-dir extracted_threads
-```
 
-**Extract thread to a single file:**
-```bash
+# Extract thread to a single file
 python xenforo_extractor.py 12345 \
   --base-url https://forum.example.com \
   --api-key abc123xyz789 \
@@ -111,14 +147,15 @@ Thread_Title_12345/
 
 ### Post Format
 
-Each post includes YAML frontmatter with metadata:
+Each post includes a header and YAML frontmatter with metadata:
 
 ```markdown
+## Post 1
+
 ---
-author: username
-date: 2024-01-15 14:30:00
-post_id: 67890
-thread: Thread Title
+Author: username
+Date: 2024-01-15
+Post_ID: 67890
 ---
 
 Post content in markdown format...
@@ -128,16 +165,30 @@ Post content in markdown format...
 
 The tool automatically converts common BB codes to Markdown:
 
-| BB Code | Markdown |
-|---------|----------|
-| `[b]text[/b]` | `**text**` |
-| `[i]text[/i]` | `*text*` |
-| `[u]text[/u]` | `_text_` |
-| `[s]text[/s]` | `~~text~~` |
-| `[code]code[/code]` | ` ```code``` ` |
-| `[url=link]text[/url]` | `[text](link)` |
-| `[img]url[/img]` | `![](url)` |
-| `[quote]text[/quote]` | `> text` |
+| BB Code | Markdown | Notes |
+|---------|----------|-------|
+| `[b]text[/b]` | `**text**` | Bold |
+| `[i]text[/i]` | `*text*` | Italic |
+| `[u]text[/u]` | `_text_` | Underline |
+| `[s]text[/s]` | `~~text~~` | Strikethrough |
+| `[code]code[/code]` | ` ```code``` ` | Code block |
+| `[url=link]text[/url]` | `[text](link)` | Link |
+| `[img]url[/img]` | `![](url)` | Image |
+| `[quote]text[/quote]` | `> text` | Quote |
+| `[spoiler=title]text[/spoiler]` | `Spoiler-title: text` | Spoiler with title |
+| `[spoiler]text[/spoiler]` | `Spoiler: text` | Spoiler without title |
+| `[inlinespoiler]text[/inlinespoiler]` | `Spoiler: text` | Inline spoiler |
+
+### Custom Forum Tags (Omitted)
+
+The following custom BB codes are completely removed from output:
+- `[side]...[/side]` - Sidebar content (omitted)
+- `[ibanner]...[/ibanner]` - Image banners (omitted)
+- `[fa]...[/fa]` - Font Awesome icons (omitted)
+- `[bannericon]...[/bannericon]` - Banner icons (omitted)
+- `[abbr=option]...[/abbr]` - Abbreviations (omitted)
+- `[metertext=option]...[/metertext]` - Meter text (omitted)
+- `[metercolor=option]...[/metercolor]` - Meter color (omitted)
 
 ## Troubleshooting
 

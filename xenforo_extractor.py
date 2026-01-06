@@ -114,6 +114,40 @@ class XenForoExtractor:
         # Remove or convert common BB codes
         text = bb_code
 
+        # CUSTOM: Remove [side]...[/side] tags entirely (omit content)
+        text = re.sub(r'\[side\].*?\[/side\]', '', text, flags=re.IGNORECASE | re.DOTALL)
+
+        # CUSTOM: Remove custom forum tags entirely (omit content and tags)
+        text = re.sub(r'\[ibanner\].*?\[/ibanner\]', '', text, flags=re.IGNORECASE | re.DOTALL)
+        text = re.sub(r'\[fa\].*?\[/fa\]', '', text, flags=re.IGNORECASE | re.DOTALL)
+        text = re.sub(r'\[bannericon\].*?\[/bannericon\]', '', text, flags=re.IGNORECASE | re.DOTALL)
+        text = re.sub(r'\[abbr=.*?\].*?\[/abbr\]', '', text, flags=re.IGNORECASE | re.DOTALL)
+        text = re.sub(r'\[metertext=.*?\].*?\[/metertext\]', '', text, flags=re.IGNORECASE | re.DOTALL)
+        text = re.sub(r'\[metercolor=.*?\].*?\[/metercolor\]', '', text, flags=re.IGNORECASE | re.DOTALL)
+
+        # CUSTOM: Handle spoilers - keep content but mark as spoiler
+        # [spoiler=Title]content[/spoiler] -> Spoiler-Title: content
+        text = re.sub(
+            r'\[spoiler=(.*?)\](.*?)\[/spoiler\]',
+            r'Spoiler-\1: \2',
+            text,
+            flags=re.IGNORECASE | re.DOTALL
+        )
+        # [spoiler]content[/spoiler] -> Spoiler: content
+        text = re.sub(
+            r'\[spoiler\](.*?)\[/spoiler\]',
+            r'Spoiler: \1',
+            text,
+            flags=re.IGNORECASE | re.DOTALL
+        )
+        # [inlinespoiler]content[/inlinespoiler] -> Spoiler: content
+        text = re.sub(
+            r'\[inlinespoiler\](.*?)\[/inlinespoiler\]',
+            r'Spoiler: \1',
+            text,
+            flags=re.IGNORECASE | re.DOTALL
+        )
+
         # Bold
         text = re.sub(r'\[b\](.*?)\[/b\]', r'**\1**', text, flags=re.IGNORECASE | re.DOTALL)
 
@@ -158,13 +192,14 @@ class XenForoExtractor:
 
         return text.strip()
 
-    def format_post_markdown(self, post: Dict, thread_title: str = "") -> str:
+    def format_post_markdown(self, post: Dict, thread_title: str = "", post_number: int = 1) -> str:
         """
         Format a single post as markdown.
 
         Args:
             post: Post dictionary from API
-            thread_title: Optional thread title for context
+            thread_title: Optional thread title for context (not used in output per user request)
+            post_number: The post number in the thread
 
         Returns:
             Markdown formatted post
@@ -174,26 +209,21 @@ class XenForoExtractor:
         post_id = post.get('post_id', 'unknown')
         message = post.get('message', '')
 
-        # Convert timestamp to readable format
+        # Convert timestamp to readable format (date only, no time)
         if post_date:
-            date_str = datetime.fromtimestamp(post_date).strftime('%Y-%m-%d %H:%M:%S')
+            date_str = datetime.fromtimestamp(post_date).strftime('%Y-%m-%d')
         else:
             date_str = 'Unknown date'
 
         # Convert BB code to markdown
         message_md = self.bb_code_to_markdown(message)
 
-        # Format the post
+        # Format the post with new header format
         markdown = f"""---
-author: {author}
-date: {date_str}
-post_id: {post_id}
-"""
-
-        if thread_title:
-            markdown += f"thread: {thread_title}\n"
-
-        markdown += f"""---
+Author: {author}
+Date: {date_str}
+Post_ID: {post_id}
+---
 
 {message_md}
 """
@@ -242,7 +272,7 @@ post_id: {post_id}
                 # Write each post
                 for i, post in enumerate(posts, 1):
                     f.write(f"## Post {i}\n\n")
-                    post_md = self.format_post_markdown(post, thread_title)
+                    post_md = self.format_post_markdown(post, thread_title, post_number=i)
                     f.write(post_md)
                     f.write("\n\n---\n\n")
 
@@ -267,7 +297,9 @@ post_id: {post_id}
                 filename = thread_dir / f"post_{i:04d}_{post_id}.md"
 
                 with open(filename, 'w', encoding='utf-8') as f:
-                    post_md = self.format_post_markdown(post, thread_title)
+                    # Add post header
+                    f.write(f"## Post {i}\n\n")
+                    post_md = self.format_post_markdown(post, thread_title, post_number=i)
                     f.write(post_md)
 
                 # Add to index
@@ -278,22 +310,58 @@ post_id: {post_id}
             print(f"✓ Saved {len(posts)} posts to {thread_dir}/")
 
 
+def load_config(config_path: str) -> Dict:
+    """
+    Load configuration from JSON file.
+
+    Args:
+        config_path: Path to config file
+
+    Returns:
+        Dictionary with configuration values
+    """
+    try:
+        with open(config_path, 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+    except json.JSONDecodeError as e:
+        print(f"Warning: Error parsing config file {config_path}: {e}")
+        return {}
+
+
 def main():
     """Main entry point for the script."""
     parser = argparse.ArgumentParser(
         description='Extract posts from XenForo threads and convert to markdown'
     )
     parser.add_argument('thread_id', type=int, help='Thread ID to extract')
-    parser.add_argument('--base-url', required=True, help='Base URL of XenForo forum')
-    parser.add_argument('--api-key', required=True, help='XenForo API key')
+    parser.add_argument('--base-url', help='Base URL of XenForo forum')
+    parser.add_argument('--api-key', help='XenForo API key')
+    parser.add_argument('--config', default='config.json', help='Path to config file (default: config.json)')
     parser.add_argument('--output-dir', default='output', help='Output directory (default: output)')
     parser.add_argument('--single-file', action='store_true',
                         help='Save all posts in a single file instead of separate files')
 
     args = parser.parse_args()
 
+    # Load config file
+    config = load_config(args.config)
+
+    # Get base_url and api_key (command line args override config file)
+    base_url = args.base_url or config.get('base_url')
+    api_key = args.api_key or config.get('api_key')
+
+    # Validate required parameters
+    if not base_url:
+        print("✗ Error: --base-url is required (either via command line or config.json)")
+        return 1
+    if not api_key:
+        print("✗ Error: --api-key is required (either via command line or config.json)")
+        return 1
+
     # Create extractor instance
-    extractor = XenForoExtractor(args.base_url, args.api_key)
+    extractor = XenForoExtractor(base_url, api_key)
 
     # Extract and save thread
     try:
@@ -303,11 +371,14 @@ def main():
             single_file=args.single_file
         )
         print("\n✓ Extraction complete!")
+        return 0
     except requests.exceptions.HTTPError as e:
         print(f"\n✗ HTTP Error: {e}")
         print(f"Response: {e.response.text if hasattr(e, 'response') else 'No response'}")
+        return 1
     except Exception as e:
         print(f"\n✗ Error: {e}")
+        return 1
 
 
 if __name__ == '__main__':
